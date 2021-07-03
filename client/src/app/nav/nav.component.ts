@@ -32,14 +32,7 @@ export class NavComponent implements OnInit {
       // this will make sure that when the user logs in then user is redirected to matches page 
       //which is member-lists components
       this.router.navigateByUrl('/members');
-    },
-      error => {
-        console.log(error);
-        // first error is the method of toastr
-        // second error is the object which we get bakc from request
-        // third error is the property of the error object which actually has the message
-        this.toastr.error(error.error);
-      });
+    })
   }
 
   logout() {
