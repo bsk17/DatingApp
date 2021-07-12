@@ -6,89 +6,93 @@ using API.Data;
 using API.DTOs;
 using API.Entities;
 using API.Interfaces;
+using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace API.Controllers
 {
-             public class AccountController : BaseApiController
-             {
-                          private readonly DataContext _context;
-                          private readonly ITokenService _tokenService;
-                          public AccountController(DataContext context, ITokenService tokenService)
-                          {
-                                       _tokenService = tokenService;
-                                       _context = context;
-                          }
+    public class AccountController : BaseApiController
+    {
+        private readonly DataContext _context;
+        private readonly ITokenService _tokenService;
+        private readonly IMapper _mapper;
+        public AccountController(DataContext context, ITokenService tokenService, IMapper mapper)
+        {
+            _mapper = mapper;
+            _tokenService = tokenService;
+            _context = context;
+        }
 
-                          [HttpPost("register")]
-                          // Here we are using DTO beacuse we have pass string objects (username and pasword)
-                          // if we simply mention strin username and string password it will not execute
-                          // inside Register the Username and Password are objects which can be used to execute this method
+        [HttpPost("register")]
+        // Here we are using DTO beacuse we have pass string objects (username and pasword)
+        // if we simply mention strin username and string password it will not execute
+        // inside Register the Username and Password are objects which can be used to execute this method
 
-                          // We can add "validations" at three places - DB, Entity, DTO
-                          // the DTO seems to be the best approach of all
-                          public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
-                          {
-                                       if (await UserExists(registerDto.Username))
-                                                    return BadRequest("Username already taken!!");
+        // We can add "validations" at three places - DB, Entity, DTO
+        // the DTO seems to be the best approach of all
+        public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+        {
+            if (await UserExists(registerDto.Username))
+                return BadRequest("Username already taken!!");
 
-                                       using var hmac = new HMACSHA512();
+            var user = _mapper.Map<AppUser>(registerDto);
 
-                                       var user = new AppUser
-                                       {
-                                                    UserName = registerDto.Username.ToLower(),
-                                                    PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(registerDto.Password)),
-                                                    // here a random key is generated always
-                                                    PasswordSalt = hmac.Key
-                                       };
+            using var hmac = new HMACSHA512();
 
-                                       _context.Users.Add(user);
-                                       await _context.SaveChangesAsync();
+            user.UserName = registerDto.Username.ToLower();
+            user.PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(registerDto.Password));
+            // here a random key is generated always
+            user.PasswordSalt = hmac.Key;
 
-                                       return new UserDto
-                                       {
-                                                    Username = user.UserName,
-                                                    Token = _tokenService.CreateToken(user)
-                                       };
-                          }
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
 
-                          [HttpPost("login")]
-                          public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
-                          {
-                                       var user = await _context.Users
-                                                .Include(p => p.Photos)
-                                                .SingleOrDefaultAsync(x => x.UserName == loginDto.Username);
+            return new UserDto
+            {
+                Username = user.UserName,
+                Token = _tokenService.CreateToken(user),
+                KnownAs = user.KnownAs
+            };
+        }
 
-                                       if (user == null)
-                                                    return Unauthorized("Invalid Username!!!");
+        [HttpPost("login")]
+        public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
+        {
+            var user = await _context.Users
+                     .Include(p => p.Photos)
+                     .SingleOrDefaultAsync(x => x.UserName == loginDto.Username);
 
-                                       // we are providing this argument to avoid generating random key 
-                                       // which would then compute a different mac
-                                       // the already generated key is the password salt 
-                                       // which we have saved during the time of registration
-                                       using var hmac = new HMACSHA512(user.PasswordSalt);
+            if (user == null)
+                return Unauthorized("Invalid Username!!!");
 
-                                       var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(loginDto.Password));
+            // we are providing this argument to avoid generating random key 
+            // which would then compute a different mac
+            // the already generated key is the password salt 
+            // which we have saved during the time of registration
+            using var hmac = new HMACSHA512(user.PasswordSalt);
 
-                                       // check each character of the password
-                                       for (int i = 0; i < computedHash.Length; i++)
-                                       {
-                                                    if (computedHash[i] != user.PasswordHash[i])
-                                                                 return Unauthorized("Invalid Password !!");
-                                       }
+            var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(loginDto.Password));
 
-                                       return new UserDto
-                                       {
-                                                    Username = user.UserName,
-                                                    Token = _tokenService.CreateToken(user),
-                                                    PhotoUrl = user.Photos.FirstOrDefault(x => x.IsMain)?.Url
-                                       };
-                          }
+            // check each character of the password
+            for (int i = 0; i < computedHash.Length; i++)
+            {
+                if (computedHash[i] != user.PasswordHash[i])
+                    return Unauthorized("Invalid Password !!");
+            }
 
-                          private async Task<bool> UserExists(string username)
-                          {
-                                       return await _context.Users.AnyAsync(x => x.UserName == username.ToLower());
-                          }
-             }
+            return new UserDto
+            {
+                Username = user.UserName,
+                Token = _tokenService.CreateToken(user),
+                PhotoUrl = user.Photos.FirstOrDefault(x => x.IsMain)?.Url,
+                KnownAs = user.KnownAs
+            };
+        }
+
+        private async Task<bool> UserExists(string username)
+        {
+            return await _context.Users.AnyAsync(x => x.UserName == username.ToLower());
+        }
+    }
 }
